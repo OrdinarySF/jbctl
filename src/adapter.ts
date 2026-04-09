@@ -22,12 +22,26 @@ export class ToolAdapter {
 		this.client = new Client({ name: "jbctl", version: "0.1.0" });
 	}
 
-	async connect(transport: Transport): Promise<void> {
-		try {
-			await this.client.connect(transport);
-		} catch (e: any) {
-			throw new CliError("CONNECTION_ERROR", `Failed to connect: ${e.message}`);
+	async connect(transport: Transport | Transport[]): Promise<void> {
+		const candidates = Array.isArray(transport) ? transport : [transport];
+		const errors: string[] = [];
+
+		for (const t of candidates) {
+			try {
+				this.client = new Client({ name: "jbctl", version: "0.1.0" });
+				await this.client.connect(t);
+				return;
+			} catch (e: any) {
+				errors.push(formatErrorChain(e));
+			}
 		}
+
+		throw new CliError(
+			"CONNECTION_ERROR",
+			candidates.length === 1
+				? `Failed to connect: ${errors[0]}`
+				: `Failed to connect (tried ${candidates.length} transports):\n${errors.map((e, i) => `  ${i + 1}. ${e}`).join("\n")}`,
+		);
 	}
 
 	getServerInfo(): ServerInfo {
@@ -96,4 +110,18 @@ export class ToolAdapter {
 			// ignore close errors
 		}
 	}
+}
+
+/** Walk the error cause chain and join all messages into one string. */
+function formatErrorChain(err: unknown): string {
+	const parts: string[] = [];
+	let current: unknown = err;
+	while (current instanceof Error) {
+		let msg = current.message || "";
+		const code = (current as any).code;
+		if (code !== undefined) msg += ` (code: ${code})`;
+		if (msg) parts.push(msg);
+		current = (current as any).cause;
+	}
+	return parts.length > 0 ? parts.join(" → ") : String(err);
 }

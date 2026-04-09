@@ -233,9 +233,9 @@ describe("integration: call", () => {
 });
 
 describe("integration: error cases", () => {
-	test("missing --project exits 2", async () => {
+	test("missing --project defaults to cwd and succeeds", async () => {
 		const { exitCode } = await run("doctor", "-e", MOCK_ENDPOINT);
-		expect(exitCode).toBe(2);
+		expect(exitCode).toBe(0);
 	});
 
 	test("missing endpoint triggers auto-discovery (exits 1 when no IDE found)", async () => {

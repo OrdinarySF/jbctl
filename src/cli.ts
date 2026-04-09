@@ -22,12 +22,10 @@ Commands:
   inspect <tool>      Show tool schema
   call <tool>         Call a tool
 
-Required:
-  --project, -p       Project path (required for all tools except discover)
+Options:
+  --project, -p       Project path (default: current directory)
   --endpoint, -e      MCP Server endpoint URL (auto-detected if omitted)
                       or --config, -c  Path to JetBrains config JSON
-
-Options:
   --ide               Filter discover by IDE name (e.g. webstorm, idea)
   --transport, -t     Transport type: auto|http|sse (default: auto)
   --timeout           Request timeout in ms (default: 30000)

@@ -90,14 +90,9 @@ describe("parseCliArgs", () => {
 		expect(config.commandArgs).toEqual(["get_project_modules"]);
 	});
 
-	test("throws when --project is missing", () => {
-		expect(() => parse("doctor", "-e", "http://x")).toThrow(CliError);
-		try {
-			parse("doctor", "-e", "http://x");
-		} catch (e) {
-			expect((e as CliError).code).toBe("CONNECTION_ERROR");
-			expect((e as CliError).message).toContain("--project");
-		}
+	test("defaults --project to cwd when omitted", () => {
+		const config = parse("doctor", "-e", "http://x");
+		expect(config.project).toBe(process.cwd());
 	});
 
 	test("allows missing endpoint (auto-discovery handled by cli.ts)", () => {

@@ -56,14 +56,7 @@ export function parseCliArgs(argv: string[]): CliConfig {
 	const command = positionals[0] || "";
 	const commandArgs = positionals.slice(1);
 
-	// --project is required (except for discover and help)
-	const project = values.project as string | undefined;
-	if (!project && command !== "" && command !== "help" && command !== "discover") {
-		throw new CliError(
-			"CONNECTION_ERROR",
-			"Missing required parameter: --project <path>",
-		);
-	}
+	const project = (values.project as string) || process.cwd();
 
 	// Resolve endpoint from --endpoint, --config, or default
 	let endpoint = values.endpoint as string | undefined;
@@ -83,7 +76,7 @@ export function parseCliArgs(argv: string[]): CliConfig {
 	return {
 		endpoint: endpoint || "",
 		transport,
-		project: project || "",
+		project,
 		timeout: values.timeout ? parseInt(values.timeout as string, 10) : 30_000,
 		verbose: !!values.verbose,
 		command,
