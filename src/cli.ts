@@ -2,6 +2,7 @@
 
 import { ToolAdapter } from "./adapter.ts";
 import { runCall } from "./commands/call.ts";
+import { runDiscover } from "./commands/discover.ts";
 import { runDoctor } from "./commands/doctor.ts";
 import { runInspect } from "./commands/inspect.ts";
 import { runTools } from "./commands/tools.ts";
@@ -15,17 +16,19 @@ Usage:
   jbctl <command> --project <path> --endpoint <url> [options]
 
 Commands:
+  discover            Scan for running JetBrains IDEs and MCP endpoints
   doctor              Check connection to IDE MCP Server
   tools               List available tools
   inspect <tool>      Show tool schema
   call <tool>         Call a tool
 
 Required:
-  --project, -p       Project path (required for all tools)
+  --project, -p       Project path (required for all tools except discover)
   --endpoint, -e      MCP Server endpoint URL
                       or --config, -c  Path to JetBrains config JSON
 
 Options:
+  --ide               Filter discover by IDE name (e.g. webstorm, idea)
   --transport, -t     Transport type: auto|http|sse (default: auto)
   --timeout           Request timeout in ms (default: 30000)
   --verbose, -v       Show debug output
@@ -72,6 +75,26 @@ async function main() {
 				break;
 			}
 		}
+	}
+
+	// discover doesn't need endpoint/project/adapter
+	if (config.command === "discover") {
+		try {
+			const ideFilter = rawArgs.includes("--ide")
+				? rawArgs[rawArgs.indexOf("--ide") + 1]
+				: undefined;
+			const output = await runDiscover(json, ideFilter, config.timeout);
+			console.log(output);
+		} catch (e) {
+			if (e instanceof CliError) {
+				console.error(
+					json ? JSON.stringify(e.toJSON()) : `Error [${e.code}]: ${e.message}`,
+				);
+				process.exit(1);
+			}
+			throw e;
+		}
+		process.exit(0);
 	}
 
 	const adapter = new ToolAdapter(config.project);

@@ -56,9 +56,9 @@ export function parseCliArgs(argv: string[]): CliConfig {
 	const command = positionals[0] || "";
 	const commandArgs = positionals.slice(1);
 
-	// --project is required
+	// --project is required (except for discover and help)
 	const project = values.project as string | undefined;
-	if (!project && command !== "" && command !== "help") {
+	if (!project && command !== "" && command !== "help" && command !== "discover") {
 		throw new CliError(
 			"CONNECTION_ERROR",
 			"Missing required parameter: --project <path>",
@@ -78,7 +78,7 @@ export function parseCliArgs(argv: string[]): CliConfig {
 		}
 	}
 
-	if (!endpoint && command !== "" && command !== "help") {
+	if (!endpoint && command !== "" && command !== "help" && command !== "discover") {
 		throw new CliError(
 			"CONNECTION_ERROR",
 			"Missing endpoint. Provide --endpoint <url> or --config <path>",
