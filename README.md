@@ -1,141 +1,14 @@
 # jbctl
 
-CLI bridge for JetBrains IDE MCP Server. Talk to your IDE from the terminal.
+[English](README.md) | [中文](README.zh-CN.md)
 
-Connects to WebStorm, IntelliJ IDEA, GoLand, PyCharm, etc. via the [Model Context Protocol](https://modelcontextprotocol.io), exposing 41+ built-in IDE tools as stable CLI commands. Built for AI agents, scriptable workflows, and humans who prefer the terminal.
+Give your AI agent access to 41+ JetBrains IDE tools — code analysis, search, refactoring, database queries, and more.
 
-## Why
+jbctl is an [Agent Skill](https://agentskills.io) that bridges AI agents (Claude Code, etc.) to the built-in [MCP Server](https://modelcontextprotocol.io) in WebStorm, IntelliJ IDEA, GoLand, PyCharm, and other JetBrains IDEs (2025.2+). The agent learns a `discover → doctor → inspect → call` workflow and can autonomously use any IDE tool.
 
-JetBrains IDEs (2025.2+) ship with a built-in MCP Server that exposes code analysis, search, refactoring, database access, and more. But MCP is a dynamic protocol, not a CLI. Different tools have different parameter shapes, two transport modes need abstraction, and every tool requires a `projectPath` context.
+## What your agent can do
 
-jbctl sits between the MCP Server and your scripts/agents:
-
-```
-JetBrains IDE (MCP Server)
-  /stream  (Streamable HTTP)
-  /sse     (SSE fallback)
-        |
-  @modelcontextprotocol/sdk
-        |
-      jbctl
-   ┌───┴───┐
-   │ Tool  │  projectPath injection, schema lookup
-   │ CLI   │  arg parsing, output formatting, error handling
-   └───────┘
-        |
-  Agent / Script / You
-```
-
-The IDE handles the hard parts (indexing, inspections, type resolution). jbctl gives you a clean way to call it.
-
-## Setup
-
-```bash
-bun install
-```
-
-Requires:
-- [Bun](https://bun.sh) runtime
-- A JetBrains IDE (2025.2+) with MCP Server enabled
-
-Enable MCP Server: IDE Settings > Tools > MCP Server > check "Enable MCP Server".
-
-## Quick Start
-
-```bash
-# 1. Get your endpoint from IDE Settings > Tools > MCP Server
-#    Or click "Copy HTTP Stream Config" and save to a file
-
-# 2. Check connection
-bun src/cli.ts doctor -p /your/project -e http://127.0.0.1:64342/stream
-
-# 3. See what tools are available
-bun src/cli.ts tools -p /your/project -e http://127.0.0.1:64342/stream
-
-# 4. Inspect a tool's parameters
-bun src/cli.ts inspect get_file_problems -p /your/project -e http://127.0.0.1:64342/stream
-
-# 5. Call it
-bun src/cli.ts call get_file_problems -p /your/project -e http://127.0.0.1:64342/stream \
-  --json '{"path":"src/main.ts"}' --output json
-```
-
-### Using a config file
-
-Instead of `--endpoint`, export a config from the IDE and pass it with `--config`:
-
-```bash
-# In IDE: Settings > Tools > MCP Server > "Copy HTTP Stream Config"
-# Save the JSON to a file, then:
-bun src/cli.ts doctor -p /your/project --config ~/idea-mcp.json
-```
-
-Config format (auto-detected):
-```json
-{"type":"streamable-http","url":"http://127.0.0.1:64342/stream","headers":{}}
-```
-
-## Commands
-
-### `doctor` -- Check connection
-
-```bash
-bun src/cli.ts doctor -p <PROJECT> -e <ENDPOINT>
-```
-
-```
-Server:    WebStorm MCP Server 2026.1
-Transport: auto
-Endpoint:  http://127.0.0.1:64342/stream
-Project:   /Users/you/project
-Tools:     41
-Status:    connected
-```
-
-### `tools` -- List available tools
-
-```bash
-bun src/cli.ts tools -p <PROJECT> -e <ENDPOINT>           # human-readable
-bun src/cli.ts tools -p <PROJECT> -e <ENDPOINT> --json     # machine-readable
-```
-
-### `inspect <tool>` -- Show tool schema
-
-```bash
-bun src/cli.ts inspect search_text -p <PROJECT> -e <ENDPOINT>
-```
-
-Shows the tool's description and input parameters so you know what to pass.
-
-### `call <tool>` -- Call a tool
-
-```bash
-bun src/cli.ts call search_text -p <PROJECT> -e <ENDPOINT> \
-  --json '{"q":"TODO","paths":["src/**"]}' --output json
-```
-
-`projectPath` is auto-injected from `--project`. You don't need to include it in the JSON payload.
-
-## Parameters
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `--project, -p` | Yes | Project root path. All 41 tools depend on it |
-| `--endpoint, -e` | Yes* | MCP Server endpoint URL |
-| `--config, -c` | Yes* | Path to JetBrains config JSON (alternative to --endpoint) |
-| `--transport, -t` | No | `auto` (default), `http`, or `sse` |
-| `--timeout` | No | Request timeout in ms (default: 30000) |
-| `--verbose, -v` | No | Debug output |
-| `--json` | No | JSON output for doctor/tools/inspect |
-| `--output, -o` | No | Output format for call: `text` or `json` |
-
-\* Either `--endpoint` or `--config` is required.
-
-## Available Tools
-
-41 tools across 8 categories (WebStorm 2026.1). Tool availability varies by IDE product and version.
-
-| Category | Tools | Examples |
+| Category | Count | Examples |
 |----------|-------|---------|
 | File Operations | 12 | `read_file`, `create_new_file`, `replace_text_in_file`, `list_directory_tree` |
 | Search | 5 | `search_text`, `search_regex`, `search_symbol`, `find_files_by_name_keyword` |
@@ -146,66 +19,125 @@ bun src/cli.ts call search_text -p <PROJECT> -e <ENDPOINT> \
 | Database | 10 | `execute_sql_query`, `list_database_connections`, `preview_table_data` |
 | VCS & Inspection | 5 | `get_repositories`, `run_inspection_kts`, `generate_psi_tree` |
 
-Run `jbctl tools` to see the full list for your IDE.
+Tool availability varies by IDE product and version.
 
-## Transport
+## Prerequisites
 
-jbctl supports two MCP transports:
+- A JetBrains IDE (2025.2+) with MCP Server enabled
+- Enable: **Settings → Tools → MCP Server → ☑ Enable MCP Server**
 
-- **Streamable HTTP** (`/stream`) -- Preferred. Uses the newer MCP 2025-06-18 protocol.
-- **SSE** (`/sse`) -- Fallback. Uses the older HTTP+SSE protocol.
+## Setup
 
-In `auto` mode (default), jbctl tries Streamable HTTP first and falls back to SSE. The IDE exposes both on the same dynamic port.
+Tell your agent to install jbctl. For example, paste this prompt into Claude Code:
 
-## Agent Skill
+> Download the jbctl binary for this platform from GitHub Releases (https://github.com/anthropics/jbctl/releases/latest), place it in /usr/local/bin/jbctl, and make it executable. Then create a symlink for the skill: `mkdir -p .claude/skills && ln -s /usr/local/bin/jbctl/skills/jbctl .claude/skills/jbctl`.
 
-jbctl ships with an [Agent Skill](https://agentskills.io) at `skills/jbctl/SKILL.md`. To use it with Claude Code or other compatible agents:
+<details>
+<summary>Or install manually</summary>
+
+#### Option A: Download binary (recommended)
 
 ```bash
-# Symlink into your project's skill directory
+# macOS Apple Silicon
+curl -fSL https://github.com/anthropics/jbctl/releases/latest/download/jbctl-darwin-arm64 -o /usr/local/bin/jbctl
+chmod +x /usr/local/bin/jbctl
+
+# macOS Intel
+curl -fSL https://github.com/anthropics/jbctl/releases/latest/download/jbctl-darwin-x64 -o /usr/local/bin/jbctl
+chmod +x /usr/local/bin/jbctl
+
+# Linux x64
+curl -fSL https://github.com/anthropics/jbctl/releases/latest/download/jbctl-linux-x64 -o /usr/local/bin/jbctl
+chmod +x /usr/local/bin/jbctl
+```
+
+#### Option B: Build from source (requires [Bun](https://bun.sh))
+
+```bash
+git clone https://github.com/anthropics/jbctl.git
+cd jbctl && bun install && bun scripts/build.ts
+cp dist/jbctl-* /usr/local/bin/jbctl
+```
+
+#### Add the skill to your project
+
+For Claude Code:
+
+```bash
 mkdir -p .claude/skills
 ln -s /path/to/jbctl/skills/jbctl .claude/skills/jbctl
 ```
 
-The skill teaches agents the doctor > tools > inspect > call workflow.
+For other agents that support [Agent Skills](https://agentskills.io), point them at `skills/jbctl/SKILL.md`.
 
-## Project Structure
+</details>
+
+The skill teaches your agent the full workflow — connection check, tool discovery, schema inspection, and tool invocation — with guardrails for destructive operations and error handling.
+
+## How it works
 
 ```
-src/
-  cli.ts              Entry point, arg parsing, command routing
-  config.ts           CLI config, JetBrains config file reading
-  transport.ts        Streamable HTTP / SSE with auto fallback
-  adapter.ts          Tool Adapter: projectPath injection, tool calls
-  errors.ts           CliError (CONNECTION_ERROR, TOOL_ERROR, TIMEOUT)
-  commands/            doctor, tools, inspect, call
-  formatters/          text and json output
-test/                  41 tests (unit + mock MCP server integration)
-skills/jbctl/          Agent Skill definition (agentskills.io format)
+Your Agent (Claude Code, etc.)
+      |
+    jbctl CLI        ← skill teaches the agent how to call this
+      |
+  MCP Protocol       ← auto-detects transport (Streamable HTTP / SSE)
+      |
+JetBrains IDE        ← code analysis, indexing, type resolution, DB access
 ```
 
-## Tech Stack
+The IDE does the heavy lifting (indexing, inspections, type resolution). jbctl gives your agent a clean CLI interface to call it. The agent doesn't need to know about MCP transports, endpoint ports, or `projectPath` injection — jbctl handles all of that.
 
-- **Runtime**: [Bun](https://bun.sh) (startup < 10ms, built-in fetch/TypeScript)
-- **MCP Client**: [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk) v1.29.0
-- **Transport/Session**: Handled entirely by the SDK. jbctl doesn't implement any protocol logic.
+## Key features
 
-## Development
+- **Auto-discovery** — `jbctl discover` scans for running IDEs. When only one is active, `--endpoint` can be omitted entirely.
+- **Schema-first** — The skill enforces `inspect` before `call`, so the agent never guesses parameter shapes.
+- **Safe by default** — Destructive DB operations require user confirmation. Brave mode warnings when IDE dialogs will block.
+- **Two transports** — Streamable HTTP (2026.1+) with automatic SSE fallback for older IDEs.
+
+## Example sessions
+
+### Reuse IDE database connections to query data
+
+> "Look up the last 10 orders for user 42"
+
+The agent discovers the database connection already configured in your IDE — no DSN, no credentials, no `.env`:
 
 ```bash
-bun install          # install dependencies
-bun test             # run tests (41 tests, ~800ms)
-bun src/cli.ts       # show help
+jbctl doctor -p /your/project
+jbctl call list_database_connections -p /your/project --output json
+# → [{"name":"prod-readonly", ...}, {"name":"local-dev", ...}]
+
+jbctl call execute_sql_query -p /your/project \
+  --json '{"connectionName":"local-dev","query":"SELECT * FROM orders WHERE user_id = 42 ORDER BY created_at DESC LIMIT 10"}' \
+  --output json
 ```
 
-Tests include a mock MCP server (using the SDK's `StreamableHTTPServerTransport` over `node:http`), so you can run the full test suite without a running IDE.
+No driver install, no connection string — the IDE already has it.
 
-## Known Limitations
+### Rename a function with full cross-reference safety
 
-- **Dynamic port**: The IDE assigns a random port on startup. You need to get it from IDE Settings or Copy Config each time. Auto-discovery is planned for a future version.
-- **Database tools**: Only available in IDE 2026.1+. IDEA 2025.3 doesn't load the database MCP module.
-- **Brave mode**: Whether the IDE requires confirmation for terminal commands can't be detected via MCP. Check IDE settings manually.
-- **Single instance**: No multi-IDE routing yet. If you have multiple IDEs running, pass the correct endpoint for each.
+> "Rename `processOrder` to `handleOrder` across the whole project"
+
+The agent uses the IDE's refactoring engine, which understands types, imports, and string references — not just text replacement:
+
+```bash
+jbctl call search_symbol -p /your/project \
+  --json '{"symbol":"processOrder"}' --output json
+# → finds the definition and all usages
+
+jbctl call rename_refactoring -p /your/project \
+  --json '{"path":"src/services/order.ts","offset":142,"newName":"handleOrder"}' --output json
+# → IDE renames the symbol everywhere: definitions, imports, type references, JSDoc
+```
+
+One command, zero missed references.
+
+## Known limitations
+
+- **Dynamic port** — The IDE assigns a random port on startup. `jbctl discover` handles this automatically.
+- **Database tools** — Only available in IDE 2026.1+. The skill includes a JDBC fallback for older versions.
+- **Single instance** — No multi-IDE routing. Use `--endpoint` or `--ide` when multiple IDEs are running.
 
 ## License
 
