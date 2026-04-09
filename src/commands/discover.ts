@@ -182,6 +182,10 @@ export async function discoverInstances(
 		const mcpPort = xmlConfig.port ?? r.builtInPort + MCP_PORT_OFFSET;
 		const mcpAlive = await probeMcpServer(mcpPort, timeoutMs);
 
+		// 2026.1+ (baseline >= 261) supports /stream, older only /sse
+		const baseline = parseInt(r.buildNumber.split(".")[0] ?? "0", 10);
+		const mcpPath = baseline >= 261 ? "/stream" : "/sse";
+
 		instances.push({
 			productName: r.productName,
 			buildNumber: r.buildNumber,
@@ -190,7 +194,7 @@ export async function discoverInstances(
 			mcpPort,
 			mcpEnabled: mcpAlive,
 			braveMode: xmlConfig.braveMode,
-			endpoint: `http://127.0.0.1:${mcpPort}/stream`,
+			endpoint: `http://127.0.0.1:${mcpPort}${mcpPath}`,
 		});
 	}
 
