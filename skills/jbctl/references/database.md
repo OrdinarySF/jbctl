@@ -14,22 +14,22 @@ When `doctor` shows 40+ tools, use the MCP database tools directly.
 
 ```bash
 # 1. List connections
-$CLI call list_database_connections -p <PROJECT> -e <ENDPOINT> --output json
+jbctl call list_database_connections -p <PROJECT> -e <ENDPOINT> --output json
 
 # 2. List schemas for a connection
-$CLI call list_database_schemas -p <PROJECT> -e <ENDPOINT> \
+jbctl call list_database_schemas -p <PROJECT> -e <ENDPOINT> \
   --json '{"connectionName":"<name>"}' --output json
 
 # 3. List tables in a schema
-$CLI call list_schema_objects -p <PROJECT> -e <ENDPOINT> \
+jbctl call list_schema_objects -p <PROJECT> -e <ENDPOINT> \
   --json '{"connectionName":"<name>","schemaName":"<schema>","objectKind":"table"}' --output json
 
 # 4. Execute SQL
-$CLI call execute_sql_query -p <PROJECT> -e <ENDPOINT> \
+jbctl call execute_sql_query -p <PROJECT> -e <ENDPOINT> \
   --json '{"connectionName":"<name>","query":"SELECT * FROM <table> LIMIT 10"}' --output json
 
 # 5. Preview table data (alternative to raw SQL)
-$CLI call preview_table_data -p <PROJECT> -e <ENDPOINT> \
+jbctl call preview_table_data -p <PROJECT> -e <ENDPOINT> \
   --json '{"connectionName":"<name>","schemaName":"<schema>","objectName":"<table>"}' --output json
 ```
 
