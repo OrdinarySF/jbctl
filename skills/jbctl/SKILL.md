@@ -1,11 +1,11 @@
 ---
 name: jbctl
 description: |
-  Control JetBrains IDEs via MCP protocol. Connects to WebStorm, IntelliJ IDEA,
-  GoLand, PyCharm, etc. and exposes 41+ built-in IDE tools as CLI commands:
-  code analysis, search, refactoring, file operations, database queries,
-  terminal execution. Use when the user needs IDE capabilities like inspections,
-  symbol lookup, project-aware search, or database access.
+  Connects to JetBrains IDE (WebStorm, IntelliJ IDEA, GoLand, PyCharm) via MCP
+  protocol and exposes 41+ built-in tools as CLI commands. Handles code analysis,
+  project-aware search, refactoring, file operations, database queries, and terminal
+  execution. Use when the user needs IDE inspections, symbol lookup, rename refactoring,
+  database access, or any operation that benefits from IDE-level project understanding.
 license: MIT
 compatibility: Requires Bun runtime and a JetBrains IDE (2025.2+) with MCP Server enabled
 metadata:
@@ -15,64 +15,83 @@ metadata:
 
 # jbctl — JetBrains IDE Control
 
-`jbctl` connects to a running JetBrains IDE via MCP protocol, exposing 41+ built-in
-tools as CLI commands. Supports Streamable HTTP and SSE transports.
+## Setup
 
-## Prerequisites
+Requires two parameters for every command:
 
-1. A JetBrains IDE running with MCP Server enabled (Settings > Tools > MCP Server)
-2. The MCP Server endpoint URL (shown at the top of the settings page)
+- `--project, -p` — Project root path (all IDE tools depend on it)
+- `--endpoint, -e` — MCP Server endpoint URL
 
-## Required Parameters
+If the endpoint is unknown, ask the user to open IDE Settings > Tools > MCP Server
+and click "Copy HTTP Stream Config". The JSON format is:
 
-Every command needs:
-- `--project, -p <path>` — Project root path (required, all tools depend on it)
-- `--endpoint, -e <url>` — MCP Server endpoint (e.g. `http://127.0.0.1:64342/stream`)
-  - Or `--config, -c <path>` pointing to a JetBrains exported config JSON
-
-If the user hasn't provided the endpoint, ask them to:
-1. Open IDE Settings > Tools > MCP Server
-2. Click "Copy HTTP Stream Config" or "Copy SSE Config"
-3. Paste the JSON (format: `{"type":"streamable-http","url":"...","headers":{}}`)
-
-## Workflow
-
-### Step 1: Check connection
-
-```bash
-bun <jbctl-path>/src/cli.ts doctor -p <PROJECT> -e <ENDPOINT>
+```json
+{"type":"streamable-http","url":"http://127.0.0.1:<port>/stream","headers":{}}
 ```
 
-If this fails, the IDE is not running or the endpoint is wrong.
+Alternatively, save the JSON to a file and use `--config, -c <path>`.
 
-### Step 2: Discover available tools
-
-```bash
-bun <jbctl-path>/src/cli.ts tools -p <PROJECT> -e <ENDPOINT>
-```
-
-Add `--json` for machine-readable output.
-
-### Step 3: Inspect a tool's schema
+## Core workflow
 
 ```bash
-bun <jbctl-path>/src/cli.ts inspect <tool_name> -p <PROJECT> -e <ENDPOINT>
+CLI="bun /path/to/jbctl/src/cli.ts"
 ```
 
-### Step 4: Call a tool
+### 1. Verify connection
 
 ```bash
-bun <jbctl-path>/src/cli.ts call <tool_name> -p <PROJECT> -e <ENDPOINT> --json '{"param":"value"}' --output json
+$CLI doctor -p <PROJECT> -e <ENDPOINT>
 ```
 
-`projectPath` is auto-injected from `--project`. No need to include it in the JSON payload.
+Check the tool count in the output. This determines which capabilities are available:
+- **40+ tools** → Full capabilities including database MCP tools
+- **< 30 tools** → Older IDE version, database requires fallback (see [references/database.md](references/database.md))
+
+### 2. Discover tools
+
+```bash
+$CLI tools -p <PROJECT> -e <ENDPOINT> --json
+```
+
+### 3. Inspect tool schema before calling
+
+```bash
+$CLI inspect <tool_name> -p <PROJECT> -e <ENDPOINT>
+```
+
+### 4. Call a tool
+
+```bash
+$CLI call <tool_name> -p <PROJECT> -e <ENDPOINT> \
+  --json '{"param":"value"}' --output json
+```
+
+`projectPath` is auto-injected from `--project`. Do not include it in `--json`.
+
+## Key tool categories
+
+| Category | Tools | When to use |
+|----------|-------|-------------|
+| Code analysis | `get_file_problems`, `build_project`, `get_symbol_info` | Inspections, error checking, symbol docs |
+| Search | `search_text`, `search_regex`, `search_symbol`, `find_files_by_name_keyword` | Project-wide search, faster than grep |
+| File ops | `read_file`, `replace_text_in_file`, `list_directory_tree` | IDE-aware file operations |
+| Refactoring | `rename_refactoring` | Project-wide rename with reference updates |
+| Database | `list_database_connections`, `execute_sql_query` | Query project databases (IDE 2026.1+ only) |
+| Terminal | `execute_terminal_command` | Run commands in IDE terminal |
+
+For complete tool examples, see [references/examples.md](references/examples.md).
+
+## Database access
+
+Two paths depending on IDE version. See [references/database.md](references/database.md) for full details.
+
+**Quick decision:**
+- `doctor` shows 40+ tools → Use MCP DB tools directly (`execute_sql_query`)
+- `doctor` shows < 30 tools → Use fallback: read `.idea/dataSources.xml` + direct JDBC
 
 ## Notes
 
-- All tools require `projectPath`, auto-injected from `--project`
-- IDE port is dynamic and changes on restart. Always verify with `doctor` first
-- `--output json` returns structured output (prefers `structuredContent` when available)
-- Database tools require IDE 2026.1+ (unavailable in IDEA 2025.3)
-- `brave mode` cannot be detected via MCP. Check IDE settings manually
-
-See [references/examples.md](references/examples.md) for common tool usage patterns.
+- IDE port is dynamic. Always run `doctor` first to verify.
+- Different IDE products/versions expose different tool counts.
+- `--output json` prefers `structuredContent` when available.
+- `brave mode` is not detectable via MCP.
