@@ -35,9 +35,17 @@ async function probeBuiltInServer(
 			signal: AbortSignal.timeout(timeoutMs),
 		});
 		if (!resp.ok) return null;
-		const data = await resp.json();
-		if (data.productName && data.buildNumber) {
-			return data;
+		const data = (await resp.json()) as Record<string, unknown>;
+		if (
+			typeof data.productName === "string" &&
+			typeof data.buildNumber === "string" &&
+			typeof data.name === "string"
+		) {
+			return data as unknown as {
+				productName: string;
+				buildNumber: string;
+				name: string;
+			};
 		}
 		return null;
 	} catch {
@@ -87,7 +95,7 @@ function readMcpServerXml(
 		const braveMode = xml.includes('"enableBraveMode" value="true"');
 		const portMatch = xml.match(/"mcpServerPort" value="(\d+)"/);
 		return {
-			port: portMatch ? parseInt(portMatch[1], 10) : null,
+			port: portMatch?.[1] ? parseInt(portMatch[1], 10) : null,
 			enabled,
 			braveMode,
 		};
@@ -121,7 +129,7 @@ function findProductDir(
 
 	// buildNumber like "261.22158.274" → baselineVersion "2026.1" (261 → 2026.1)
 	// Or "253.32098.37" → "2025.3"
-	const baseline = parseInt(buildNumber.split(".")[0], 10);
+	const baseline = parseInt(buildNumber.split(".")[0] ?? "0", 10);
 	const major = 2000 + Math.floor(baseline / 10);
 	const minor = baseline % 10;
 	const version = `${major}.${minor}`;
@@ -137,12 +145,11 @@ function findProductDir(
 	}
 }
 
-export async function runDiscover(
-	json: boolean,
+/** Core discovery logic — returns all found instances, filtered by IDE name if given. */
+export async function discoverInstances(
 	ide?: string,
 	timeoutMs = 500,
-): Promise<string> {
-	// Probe all built-in server ports in parallel
+): Promise<IdeInstance[]> {
 	const probes = [];
 	for (let port = BUILTIN_PORT_START; port <= BUILTIN_PORT_END; port++) {
 		probes.push(
@@ -156,18 +163,9 @@ export async function runDiscover(
 		(r): r is NonNullable<typeof r> => r !== null,
 	);
 
-	if (results.length === 0) {
-		throw new CliError(
-			"CONNECTION_ERROR",
-			"No running JetBrains IDE found on ports 63342-63352",
-		);
-	}
-
-	// For each IDE, determine MCP port and verify
 	const instances: IdeInstance[] = [];
 
 	for (const r of results) {
-		// Filter by --ide if specified
 		if (
 			ide &&
 			!r.productName.toLowerCase().includes(ide.toLowerCase()) &&
@@ -196,10 +194,20 @@ export async function runDiscover(
 		});
 	}
 
+	return instances;
+}
+
+export async function runDiscover(
+	json: boolean,
+	ide?: string,
+	timeoutMs = 500,
+): Promise<string> {
+	const instances = await discoverInstances(ide, timeoutMs);
+
 	if (instances.length === 0) {
 		const msg = ide
 			? `No running JetBrains IDE matching "${ide}" found`
-			: "No running JetBrains IDE found";
+			: "No running JetBrains IDE found on ports 63342-63352";
 		throw new CliError("CONNECTION_ERROR", msg);
 	}
 

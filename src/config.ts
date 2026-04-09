@@ -78,12 +78,7 @@ export function parseCliArgs(argv: string[]): CliConfig {
 		}
 	}
 
-	if (!endpoint && command !== "" && command !== "help" && command !== "discover") {
-		throw new CliError(
-			"CONNECTION_ERROR",
-			"Missing endpoint. Provide --endpoint <url> or --config <path>",
-		);
-	}
+	// endpoint is optional — cli.ts will auto-discover if missing
 
 	return {
 		endpoint: endpoint || "",

@@ -238,9 +238,9 @@ describe("integration: error cases", () => {
 		expect(exitCode).toBe(2);
 	});
 
-	test("missing endpoint exits 2", async () => {
+	test("missing endpoint triggers auto-discovery (exits 1 when no IDE found)", async () => {
 		const { exitCode } = await run("doctor", "-p", "/tmp");
-		expect(exitCode).toBe(2);
+		expect(exitCode).toBe(1);
 	});
 
 	test("connection to dead endpoint exits 1", async () => {

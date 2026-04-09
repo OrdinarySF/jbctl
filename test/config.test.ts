@@ -100,14 +100,9 @@ describe("parseCliArgs", () => {
 		}
 	});
 
-	test("throws when --endpoint and --config are both missing", () => {
-		expect(() => parse("doctor", "-p", "/tmp")).toThrow(CliError);
-		try {
-			parse("doctor", "-p", "/tmp");
-		} catch (e) {
-			expect((e as CliError).code).toBe("CONNECTION_ERROR");
-			expect((e as CliError).message).toContain("endpoint");
-		}
+	test("allows missing endpoint (auto-discovery handled by cli.ts)", () => {
+		const config = parse("doctor", "-p", "/tmp");
+		expect(config.endpoint).toBe("");
 	});
 
 	test("does not throw for help command without params", () => {

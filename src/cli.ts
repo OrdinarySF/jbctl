@@ -2,7 +2,7 @@
 
 import { ToolAdapter } from "./adapter.ts";
 import { runCall } from "./commands/call.ts";
-import { runDiscover } from "./commands/discover.ts";
+import { discoverInstances, runDiscover } from "./commands/discover.ts";
 import { runDoctor } from "./commands/doctor.ts";
 import { runInspect } from "./commands/inspect.ts";
 import { runTools } from "./commands/tools.ts";
@@ -24,7 +24,7 @@ Commands:
 
 Required:
   --project, -p       Project path (required for all tools except discover)
-  --endpoint, -e      MCP Server endpoint URL
+  --endpoint, -e      MCP Server endpoint URL (auto-detected if omitted)
                       or --config, -c  Path to JetBrains config JSON
 
 Options:
@@ -95,6 +95,29 @@ async function main() {
 			throw e;
 		}
 		process.exit(0);
+	}
+
+	// Auto-discover endpoint if not provided
+	if (!config.endpoint) {
+		const active = (await discoverInstances()).filter((i) => i.mcpEnabled);
+		if (active.length === 0) {
+			console.error(
+				"Error [CONNECTION_ERROR]: No MCP-active JetBrains IDE found. Provide --endpoint or start an IDE with MCP Server enabled.",
+			);
+			process.exit(1);
+		}
+		if (active.length > 1) {
+			const list = active
+				.map((i) => `  ${i.displayName}  →  ${i.endpoint}`)
+				.join("\n");
+			console.error(
+				`Error [CONNECTION_ERROR]: Multiple MCP-active IDEs found. Specify --endpoint:\n${list}`,
+			);
+			process.exit(1);
+		}
+		const detected = active[0]!;
+		config.endpoint = detected.endpoint;
+		console.error(`Auto-detected: ${detected.displayName} (${detected.endpoint})`);
 	}
 
 	const adapter = new ToolAdapter(config.project);

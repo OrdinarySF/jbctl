@@ -26,15 +26,11 @@ description: |
 Every command uses two parameters:
 
 - `--project, -p` — Project root path. Defaults to current working directory.
-- `--endpoint, -e` — MCP Server endpoint URL (required unless auto-discovered)
-
-**If the endpoint is unknown, auto-discover it** (see [Auto-discovery](#auto-discovery) below). Manual fallback: instruct the user to open IDE Settings > Tools > MCP Server > click "Copy HTTP Stream Config".
+- `--endpoint, -e` — MCP Server endpoint URL. Auto-detected when omitted if exactly one MCP-active IDE is running. Use `jbctl discover` to list all instances.
 
 Alternatively, save the config JSON to a file and use `--config, -c <path>`.
 
 ## Core workflow
-
-> If `--endpoint` is not known, run [Auto-discovery](#auto-discovery) first.
 
 ### 1. Verify connection (ALWAYS first)
 
@@ -67,19 +63,18 @@ jbctl call <tool_name> -p <PROJECT> -e <ENDPOINT> \
 
 ## Auto-discovery
 
-When `--endpoint` is not known, resolve it before proceeding:
+`--endpoint` is auto-detected when omitted. If exactly one MCP-active IDE is running, all commands work without `-e`:
 
 ```bash
-jbctl discover --json
+jbctl doctor -p <PROJECT>
 ```
 
-Parse the JSON array and filter to entries where `mcpEnabled` is `true`.
+When multiple IDEs are running, the CLI prints the list and exits. Use `jbctl discover` to see all instances, then specify `-e` explicitly or filter with `--ide`:
 
-- **One active IDE** → use its `endpoint` value. Inform the user which IDE was detected.
-- **Multiple active IDEs** → present the list with the AskUserQuestion tool and ask the user to pick one.
-- **Zero active IDEs** → stop. Tell the user: "No MCP-active JetBrains IDE found. Verify the IDE is running and MCP Server is enabled in Settings > Tools > MCP Server."
-
-To filter by IDE name: `jbctl discover --ide webstorm --json`
+```bash
+jbctl discover                          # list all
+jbctl discover --ide webstorm --json    # filter by IDE name
+```
 
 ## Database access
 
