@@ -6,6 +6,10 @@ description: |
   project-aware search, refactoring, file operations, database queries, and terminal
   execution. Use when the user needs IDE inspections, symbol lookup, rename refactoring,
   database access, or any operation that benefits from IDE-level project understanding.
+compatibility: Requires Bun (preferred) or Node.js. Target IDE must have MCP Server plugin enabled.
+metadata:
+  author: OrdinarySF
+  version: "0.2.0"
 ---
 
 # jbctl — JetBrains IDE Control
@@ -15,31 +19,19 @@ description: |
 - MUST run `jbctl doctor` first on every new session to verify connection and tool count.
 - MUST run `jbctl inspect <tool>` before calling any tool for the first time — schema changes across IDE versions.
 - NEVER include `projectPath` in `--json` — it is auto-injected from `--project`.
-- NEVER guess parameter names or values. If `inspect` output is ambiguous, use the AskUserQuestion tool to show the schema and ask for clarification.
-- NEVER run destructive database operations (DROP, DELETE, TRUNCATE, ALTER) without using the AskUserQuestion tool to get explicit user confirmation first.
-- NEVER call more than 3 tools in sequence without reporting results to the user.
-- If a tool call fails, report the error immediately. Do NOT retry the same call more than once.
-- When `discover` returns `braveMode: false` for the target IDE, warn the user: execution tools (terminal, file write, refactoring) will pop a confirmation dialog in the IDE that blocks until clicked.
+- NEVER guess parameter names or values. If `inspect` output is ambiguous, ask the user for clarification.
+- NEVER run destructive database operations (DROP, DELETE, TRUNCATE, ALTER) without explicit user confirmation first.
+- When `discover` returns `braveMode: false`, warn the user: execution tools (terminal, file write, refactoring) will pop a confirmation dialog in the IDE that blocks until clicked.
 
 ## Installation
 
-If `jbctl` is not installed, run it directly via `bunx` (preferred) or `npx`:
+Run directly without installing:
 
 ```bash
 bunx jbctl doctor
-# or: npx jbctl doctor
 ```
 
-To install globally: `bun i -g jbctl` or `npm i -g jbctl`.
-
-## Setup
-
-Every command uses two parameters:
-
-- `--project, -p` — Project root path. Defaults to current working directory.
-- `--endpoint, -e` — MCP Server endpoint URL. Auto-detected when omitted if exactly one MCP-active IDE is running. Use `jbctl discover` to list all instances.
-
-Alternatively, save the config JSON to a file and use `--config, -c <path>`.
+If `bunx` is unavailable, use `npx jbctl doctor`. To install globally: `bun i -g jbctl`.
 
 ## Core workflow
 
@@ -49,7 +41,7 @@ Alternatively, save the config JSON to a file and use `--config, -c <path>`.
 jbctl doctor
 ```
 
-Check the tool count — this determines available capabilities:
+Check the tool count to determine capabilities:
 - **40+ tools** → Full capabilities including database MCP tools
 - **< 30 tools** → Older IDE version, database requires fallback (see [references/database.md](references/database.md))
 
@@ -71,25 +63,7 @@ jbctl inspect <tool_name>
 jbctl call <tool_name> --json '{"param":"value"}' --output json
 ```
 
-## Auto-discovery
-
-Both `--endpoint` and `--project` are auto-detected when omitted:
-
-- `--project` defaults to the current working directory.
-- `--endpoint` is resolved automatically — even when multiple IDEs are running.
-
-The CLI matches the project path against each IDE's opened projects (via `recentProjects.xml`). If that doesn't narrow it down to one, it falls back to probing each MCP instance with a lightweight tool call. You almost never need to specify `-e` manually:
-
-```bash
-jbctl doctor                            # auto-detects both project and endpoint
-```
-
-Use `jbctl discover` to see all running instances:
-
-```bash
-jbctl discover                          # list all (shows opened projects)
-jbctl discover --ide webstorm --json    # filter by IDE name
-```
+Both `--project` and `--endpoint` are auto-detected — you almost never need to specify them manually. Use `jbctl discover` to list all running IDE instances if auto-detection fails.
 
 ## Database access
 
@@ -98,7 +72,9 @@ Two paths depending on IDE version. See [references/database.md](references/data
 - `doctor` shows 40+ tools → Use MCP DB tools directly (`execute_sql_query`)
 - `doctor` shows < 30 tools → Use fallback: read `.idea/dataSources.xml` + direct JDBC
 
-## Notes
+## Gotchas
 
-- Different IDE products/versions expose different tool counts.
-- `--output json` prefers `structuredContent` when available.
+- Different IDE products/versions expose different tool counts — always check via `doctor` first.
+- `--output json` prefers `structuredContent` when available; not all tools return it.
+- Auto-detection can fail when multiple IDEs have the same project open — use `jbctl discover` then pass `-e` explicitly.
+- Some tool names differ between IDE products (e.g. WebStorm vs IntelliJ). Always use `jbctl tools` to get the actual list.
