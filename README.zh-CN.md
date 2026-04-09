@@ -33,7 +33,24 @@ jbctl 是一个 [Agent Skill](https://agentskills.io)，将 AI agent（Claude Co
 <details>
 <summary>或者手动安装</summary>
 
-#### 方式 A：下载二进制文件（推荐）
+#### 方式 A：npm / bun（推荐）
+
+```bash
+# bun
+bun i -g jbctl
+
+# 或 npm
+npm i -g jbctl
+```
+
+或直接运行，无需安装：
+
+```bash
+bunx jbctl doctor
+# 或: npx jbctl doctor
+```
+
+#### 方式 B：下载二进制文件
 
 ```bash
 # macOS Apple Silicon
@@ -49,7 +66,7 @@ curl -fSL https://github.com/anthropics/jbctl/releases/latest/download/jbctl-lin
 chmod +x /usr/local/bin/jbctl
 ```
 
-#### 方式 B：从源码构建（需要 [Bun](https://bun.sh)）
+#### 方式 C：从源码构建（需要 [Bun](https://bun.sh)）
 
 ```bash
 git clone https://github.com/anthropics/jbctl.git

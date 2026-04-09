@@ -21,6 +21,17 @@ description: |
 - If a tool call fails, report the error immediately. Do NOT retry the same call more than once.
 - When `discover` returns `braveMode: false` for the target IDE, warn the user: execution tools (terminal, file write, refactoring) will pop a confirmation dialog in the IDE that blocks until clicked.
 
+## Installation
+
+If `jbctl` is not installed, run it directly via `bunx` (preferred) or `npx`:
+
+```bash
+bunx jbctl doctor
+# or: npx jbctl doctor
+```
+
+To install globally: `bun i -g jbctl` or `npm i -g jbctl`.
+
 ## Setup
 
 Every command uses two parameters:

@@ -35,7 +35,24 @@ Tell your agent to install jbctl. For example, paste this prompt into Claude Cod
 <details>
 <summary>Or install manually</summary>
 
-#### Option A: Download binary (recommended)
+#### Option A: npm / bun (recommended)
+
+```bash
+# bun
+bun i -g jbctl
+
+# or npm
+npm i -g jbctl
+```
+
+Or run directly without installing:
+
+```bash
+bunx jbctl doctor
+# or: npx jbctl doctor
+```
+
+#### Option B: Download binary
 
 ```bash
 # macOS Apple Silicon
@@ -51,7 +68,7 @@ curl -fSL https://github.com/anthropics/jbctl/releases/latest/download/jbctl-lin
 chmod +x /usr/local/bin/jbctl
 ```
 
-#### Option B: Build from source (requires [Bun](https://bun.sh))
+#### Option C: Build from source (requires [Bun](https://bun.sh))
 
 ```bash
 git clone https://github.com/anthropics/jbctl.git
