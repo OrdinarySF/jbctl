@@ -9,9 +9,12 @@
   },
   "scripts": {
     "start": "bun src/cli.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "build": "bun scripts/build.ts",
+    "build:all": "bun scripts/build.ts --all"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.11",
     "@types/bun": "latest"
   },
   "peerDependencies": {
