@@ -2,7 +2,11 @@
 
 import { ToolAdapter } from "./adapter.ts";
 import { runCall } from "./commands/call.ts";
-import { discoverInstances, runDiscover } from "./commands/discover.ts";
+import {
+	type IdeInstance,
+	discoverInstances,
+	runDiscover,
+} from "./commands/discover.ts";
 import { runDoctor } from "./commands/doctor.ts";
 import { runInspect } from "./commands/inspect.ts";
 import { runTools } from "./commands/tools.ts";
@@ -33,6 +37,47 @@ Options:
   --json              Output in JSON format
   --output, -o        Output format for call: text|json (default: text)
 `;
+
+/**
+ * Resolve which IDE instance owns the given project path.
+ * Fast path: match against opened projects from recentProjects.xml.
+ * Fallback: connect to each MCP instance and probe with a lightweight tool call.
+ */
+async function resolveByProject(
+	instances: IdeInstance[],
+	projectPath: string,
+): Promise<IdeInstance | undefined> {
+	// Fast path: match opened projects from config files
+	const matched = instances.filter((i) =>
+		i.openedProjects.some((p) => projectPath.startsWith(p)),
+	);
+	if (matched.length === 1) return matched[0];
+
+	// Fallback: probe each MCP instance with a tool call
+	const probes = instances.map(async (instance) => {
+		const adapter = new ToolAdapter(projectPath);
+		try {
+			const transport = await createTransport(
+				instance.endpoint,
+				"auto",
+			);
+			await adapter.connect(transport);
+			const result = await adapter.callTool("get_project_modules", {});
+			// If the call succeeds without error, this instance owns the project
+			if (!result.isError) return instance;
+			return null;
+		} catch {
+			return null;
+		} finally {
+			await adapter.close();
+		}
+	});
+
+	const results = (await Promise.all(probes)).filter(
+		(r): r is IdeInstance => r !== null,
+	);
+	return results.length === 1 ? results[0] : undefined;
+}
 
 async function main() {
 	let config: import("./config.ts").CliConfig;
@@ -104,16 +149,25 @@ async function main() {
 			);
 			process.exit(1);
 		}
-		if (active.length > 1) {
-			const list = active
-				.map((i) => `  ${i.displayName}  →  ${i.endpoint}`)
-				.join("\n");
-			console.error(
-				`Error [CONNECTION_ERROR]: Multiple MCP-active IDEs found. Specify --endpoint:\n${list}`,
-			);
-			process.exit(1);
+
+		let detected: (typeof active)[0] | undefined;
+
+		if (active.length === 1) {
+			detected = active[0]!;
+		} else {
+			// Multiple IDEs — try matching project path from recentProjects.xml
+			detected = await resolveByProject(active, config.project);
+			if (!detected) {
+				const list = active
+					.map((i) => `  ${i.displayName}  →  ${i.endpoint}`)
+					.join("\n");
+				console.error(
+					`Error [CONNECTION_ERROR]: Multiple MCP-active IDEs found and none matched project "${config.project}". Specify --endpoint:\n${list}`,
+				);
+				process.exit(1);
+			}
 		}
-		const detected = active[0]!;
+
 		config.endpoint = detected.endpoint;
 		console.error(`Auto-detected: ${detected.displayName} (${detected.endpoint})`);
 	}
@@ -160,6 +214,9 @@ async function main() {
 		throw e;
 	} finally {
 		await adapter.close();
+		// StreamableHTTP transport keeps an SSE GET stream alive for server pushes.
+		// Bun may not fully release the TCP socket on abort, so force exit for CLI.
+		process.exit(0);
 	}
 }
 

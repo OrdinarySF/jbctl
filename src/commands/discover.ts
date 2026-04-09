@@ -11,6 +11,7 @@ export interface IdeInstance {
 	mcpEnabled: boolean;
 	braveMode: boolean;
 	endpoint: string;
+	openedProjects: string[];
 }
 
 const BUILTIN_PORT_START = 63342;
@@ -104,6 +105,38 @@ function readMcpServerXml(
 	}
 }
 
+/**
+ * Read recentProjects.xml and return paths of currently opened projects.
+ * Projects with opened="true" on their RecentProjectMetaInfo element are currently open in the IDE.
+ */
+function readOpenedProjects(productDir: string): string[] {
+	const xmlPath = join(
+		JETBRAINS_SUPPORT_DIR,
+		productDir,
+		"options/recentProjects.xml",
+	);
+	try {
+		const xml = readFileSync(xmlPath, "utf-8");
+		const home = process.env.HOME || "";
+		const projects: string[] = [];
+
+		// Match entry keys where the nested RecentProjectMetaInfo has opened="true"
+		const entryRegex =
+			/<entry key="([^"]+)">\s*<value>\s*<RecentProjectMetaInfo[^>]*opened="true"/g;
+		let match: RegExpExecArray | null;
+		while ((match = entryRegex.exec(xml)) !== null) {
+			let path = match[1]!;
+			path = path.replace("$USER_HOME$", home);
+			// Skip non-filesystem paths (e.g. $APPLICATION_CONFIG_DIR$/...)
+			if (path.includes("$")) continue;
+			projects.push(path);
+		}
+		return projects;
+	} catch {
+		return [];
+	}
+}
+
 /** Map productName from /api/about to JetBrains support dir prefix */
 const PRODUCT_DIR_PREFIX: Record<string, string> = {
 	IDEA: "IntelliJIdea",
@@ -186,6 +219,10 @@ export async function discoverInstances(
 		const baseline = parseInt(r.buildNumber.split(".")[0] ?? "0", 10);
 		const mcpPath = baseline >= 261 ? "/stream" : "/sse";
 
+		const openedProjects = productDir
+			? readOpenedProjects(productDir)
+			: [];
+
 		instances.push({
 			productName: r.productName,
 			buildNumber: r.buildNumber,
@@ -195,6 +232,7 @@ export async function discoverInstances(
 			mcpEnabled: mcpAlive,
 			braveMode: xmlConfig.braveMode,
 			endpoint: `http://127.0.0.1:${mcpPort}${mcpPath}`,
+			openedProjects,
 		});
 	}
 
@@ -223,12 +261,18 @@ export async function runDiscover(
 		.map((i) => {
 			const status = i.mcpEnabled ? "MCP active" : "MCP inactive";
 			const brave = i.braveMode ? "on" : "off";
-			return [
+			const lines = [
 				`${i.displayName}`,
 				`  Built-in: http://127.0.0.1:${i.builtInPort}`,
 				`  MCP:      ${i.endpoint}  (${status})`,
 				`  Brave:    ${brave}`,
-			].join("\n");
+			];
+			if (i.openedProjects.length > 0) {
+				lines.push(
+					`  Projects: ${i.openedProjects.map((p) => p.split("/").pop()).join(", ")}`,
+				);
+			}
+			return lines.join("\n");
 		})
 		.join("\n\n");
 }

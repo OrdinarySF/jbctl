@@ -46,7 +46,7 @@ Alternatively, save the config JSON to a file and use `--config, -c <path>`.
 ### 1. Verify connection (ALWAYS first)
 
 ```bash
-jbctl doctor -p <PROJECT> -e <ENDPOINT>
+jbctl doctor
 ```
 
 Check the tool count — this determines available capabilities:
@@ -56,34 +56,38 @@ Check the tool count — this determines available capabilities:
 ### 2. Discover tools
 
 ```bash
-jbctl tools -p <PROJECT> -e <ENDPOINT> --json
+jbctl tools --json
 ```
 
 ### 3. Inspect tool schema before calling
 
 ```bash
-jbctl inspect <tool_name> -p <PROJECT> -e <ENDPOINT>
+jbctl inspect <tool_name>
 ```
 
 ### 4. Call a tool
 
 ```bash
-jbctl call <tool_name> -p <PROJECT> -e <ENDPOINT> \
-  --json '{"param":"value"}' --output json
+jbctl call <tool_name> --json '{"param":"value"}' --output json
 ```
 
 ## Auto-discovery
 
-`--endpoint` is auto-detected when omitted. If exactly one MCP-active IDE is running, all commands work without `-e`:
+Both `--endpoint` and `--project` are auto-detected when omitted:
+
+- `--project` defaults to the current working directory.
+- `--endpoint` is resolved automatically — even when multiple IDEs are running.
+
+The CLI matches the project path against each IDE's opened projects (via `recentProjects.xml`). If that doesn't narrow it down to one, it falls back to probing each MCP instance with a lightweight tool call. You almost never need to specify `-e` manually:
 
 ```bash
-jbctl doctor -p <PROJECT>
+jbctl doctor                            # auto-detects both project and endpoint
 ```
 
-When multiple IDEs are running, the CLI prints the list and exits. Use `jbctl discover` to see all instances, then specify `-e` explicitly or filter with `--ide`:
+Use `jbctl discover` to see all running instances:
 
 ```bash
-jbctl discover                          # list all
+jbctl discover                          # list all (shows opened projects)
 jbctl discover --ide webstorm --json    # filter by IDE name
 ```
 

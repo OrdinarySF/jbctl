@@ -21,9 +21,9 @@ export function createTransport(
 		return new SSEClientTransport(new URL(`${baseUrl}/sse`));
 	}
 
-	// auto: infer preferred order from URL suffix, fallback to the other
-	const prefersSSE = endpoint.endsWith("/sse");
-	const sse = new SSEClientTransport(new URL(`${baseUrl}/sse`));
-	const http = new StreamableHTTPClientTransport(new URL(`${baseUrl}/stream`));
-	return prefersSSE ? [sse, http] : [http, sse];
+	// auto: use the transport matching the URL suffix, fallback to the other
+	if (endpoint.endsWith("/sse")) {
+		return new SSEClientTransport(new URL(`${baseUrl}/sse`));
+	}
+	return new StreamableHTTPClientTransport(new URL(`${baseUrl}/stream`));
 }
