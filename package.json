@@ -2,6 +2,7 @@
   "name": "jbctl",
   "version": "0.1.0",
   "description": "CLI bridge for JetBrains IDE MCP Server",
+  "license": "Apache-2.0",
   "type": "module",
   "bin": {
     "jbctl": "dist/cli.js"
