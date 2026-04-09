@@ -9,8 +9,8 @@
  *   bun scripts/build.ts --target linux-x64,darwin-arm64
  */
 
-import { existsSync, mkdirSync } from "fs";
-import { parseArgs } from "util";
+import { existsSync, mkdirSync } from "node:fs";
+import { parseArgs } from "node:util";
 
 const VERSION = require("../package.json").version;
 const ENTRY = "src/cli.ts";
