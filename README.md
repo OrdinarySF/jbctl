@@ -28,55 +28,54 @@ Tool availability varies by IDE product and version.
 
 ## Setup
 
-Tell your agent to install jbctl. For example, paste this prompt into Claude Code:
+Paste this into Claude Code to install both the CLI and the skill:
 
-> Download the jbctl binary for this platform from GitHub Releases (https://github.com/anthropics/jbctl/releases/latest), place it in /usr/local/bin/jbctl, and make it executable. Then create a symlink for the skill: `mkdir -p .claude/skills && ln -s /usr/local/bin/jbctl/skills/jbctl .claude/skills/jbctl`.
+> Install jbctl globally (`bun i -g jbctl`) and add the skill (`bunx skills add https://github.com/OrdinarySF/jbctl.git`).
 
 <details>
 <summary>Or install manually</summary>
 
-#### Option A: npm / bun (recommended)
+#### 1. Install the CLI
 
 ```bash
-# bun
 bun i -g jbctl
-
-# or npm
-npm i -g jbctl
 ```
 
-Or run directly without installing:
+Or use npm: `npm i -g jbctl`. You can also run without installing via `bunx jbctl`.
+
+#### 2. Install the Skill
 
 ```bash
-bunx jbctl doctor
-# or: npx jbctl doctor
+bunx skills add https://github.com/OrdinarySF/jbctl.git
 ```
 
-#### Option B: Download binary
+This adds the skill to `.claude/skills/jbctl` in your project.
+
+#### Alternative: Download binary
 
 ```bash
 # macOS Apple Silicon
-curl -fSL https://github.com/anthropics/jbctl/releases/latest/download/jbctl-darwin-arm64 -o /usr/local/bin/jbctl
+curl -fSL https://github.com/OrdinarySF/jbctl/releases/latest/download/jbctl-darwin-arm64 -o /usr/local/bin/jbctl
 chmod +x /usr/local/bin/jbctl
 
 # macOS Intel
-curl -fSL https://github.com/anthropics/jbctl/releases/latest/download/jbctl-darwin-x64 -o /usr/local/bin/jbctl
+curl -fSL https://github.com/OrdinarySF/jbctl/releases/latest/download/jbctl-darwin-x64 -o /usr/local/bin/jbctl
 chmod +x /usr/local/bin/jbctl
 
 # Linux x64
-curl -fSL https://github.com/anthropics/jbctl/releases/latest/download/jbctl-linux-x64 -o /usr/local/bin/jbctl
+curl -fSL https://github.com/OrdinarySF/jbctl/releases/latest/download/jbctl-linux-x64 -o /usr/local/bin/jbctl
 chmod +x /usr/local/bin/jbctl
 ```
 
-#### Option C: Build from source (requires [Bun](https://bun.sh))
+#### Alternative: Build from source (requires [Bun](https://bun.sh))
 
 ```bash
-git clone https://github.com/anthropics/jbctl.git
+git clone https://github.com/OrdinarySF/jbctl.git
 cd jbctl && bun install && bun scripts/build.ts
 cp dist/jbctl-* /usr/local/bin/jbctl
 ```
 
-#### Add the skill to your project
+#### Skill: Add manually
 
 For Claude Code:
 
@@ -105,9 +104,22 @@ JetBrains IDE        ← code analysis, indexing, type resolution, DB access
 
 The IDE does the heavy lifting (indexing, inspections, type resolution). jbctl gives your agent a clean CLI interface to call it. The agent doesn't need to know about MCP transports, endpoint ports, or `projectPath` injection — jbctl handles all of that.
 
+## Why jbctl instead of direct MCP?
+
+JetBrains IDEs expose an MCP Server that agents can connect to directly. But direct MCP has friction in real-world setups:
+
+| Scenario                    | Direct MCP                                                       | jbctl                                                                                      |
+|-----------------------------|------------------------------------------------------------------|--------------------------------------------------------------------------------------------|
+| Multiple IDEs running       | Manual port config per IDE                                       | `jbctl discover` auto-resolves by matching your project path to the correct IDE instance   |
+| Git worktree                | Broken — worktree path ≠ IDE project path, MCP config can't resolve | Works — pass `-p /path/to/ide/project` to route calls to the right IDE regardless of cwd |
+| IDE restarts (port changes) | Reconfigure MCP endpoint every time                              | Auto-discovers the new port on each call                                                   |
+| Agent learns new tools      | Agent must understand raw MCP protocol                           | Skill teaches a simple CLI workflow: `tools → inspect → call`                              |
+
+In short: direct MCP works when you have one IDE, one project, no worktrees, and the port doesn't change. jbctl works everywhere else.
+
 ## Key features
 
-- **Auto-discovery** — `jbctl discover` scans for running IDEs. When only one is active, `--endpoint` can be omitted entirely.
+- **Auto-discovery** — `jbctl discover` scans for running IDEs. Matches your project path against each IDE's opened projects to find the right instance — even with multiple IDEs running simultaneously.
 - **Schema-first** — The skill enforces `inspect` before `call`, so the agent never guesses parameter shapes.
 - **Safe by default** — Destructive DB operations require user confirmation. Brave mode warnings when IDE dialogs will block.
 - **Two transports** — Streamable HTTP (2026.1+) with automatic SSE fallback for older IDEs.
@@ -154,7 +166,7 @@ One command, zero missed references.
 
 - **Dynamic port** — The IDE assigns a random port on startup. `jbctl discover` handles this automatically.
 - **Database tools** — Only available in IDE 2026.1+. The skill includes a JDBC fallback for older versions.
-- **Single instance** — No multi-IDE routing. Use `--endpoint` or `--ide` when multiple IDEs are running.
+- **Worktree detection** — Auto-discovery matches by project path. In a git worktree, pass `-p` pointing to the IDE's original project directory.
 
 ## License
 
