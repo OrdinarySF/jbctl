@@ -9,7 +9,7 @@ description: |
 compatibility: Requires Bun (preferred) or Node.js. Target IDE must have MCP Server plugin enabled.
 metadata:
   author: OrdinarySF
-  version: "0.2.0"
+  version: "0.2.1"
 allowed-tools:
    - Bash
    - AskUserQuestion
