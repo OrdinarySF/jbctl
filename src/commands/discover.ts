@@ -16,7 +16,8 @@ export interface IdeInstance {
 
 const BUILTIN_PORT_START = 63342;
 const BUILTIN_PORT_END = 63352;
-const MCP_PORT_OFFSET = 1000;
+const MCP_PORT_START = 64342;
+const MCP_PORT_END = 64352;
 
 const JETBRAINS_SUPPORT_DIR =
 	process.platform === "darwin"
@@ -54,11 +55,45 @@ async function probeBuiltInServer(
 	}
 }
 
-/** Check if MCP server is alive on the given port */
-async function probeMcpServer(
+interface McpProbeResult {
+	port: number;
+	serverName: string;
+	transport: "stream" | "sse";
+}
+
+/**
+ * Probe a single MCP port. Try /stream (Streamable HTTP) first with an
+ * initialize handshake to retrieve the server name, then fall back to /sse.
+ */
+async function probeMcpPort(
 	port: number,
 	timeoutMs: number,
-): Promise<boolean> {
+): Promise<McpProbeResult | null> {
+	// Try Streamable HTTP — a single POST gives us the server name
+	try {
+		const resp = await fetch(`http://127.0.0.1:${port}/stream`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Accept: "application/json" },
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "initialize",
+				params: {
+					protocolVersion: "2025-03-26",
+					capabilities: {},
+					clientInfo: { name: "jbctl-discover", version: "0.1.0" },
+				},
+			}),
+			signal: AbortSignal.timeout(timeoutMs),
+		});
+		if (resp.ok) {
+			const data = (await resp.json()) as any;
+			const serverName: string = data?.result?.serverInfo?.name ?? "";
+			return { port, serverName, transport: "stream" };
+		}
+	} catch {}
+
+	// Try SSE — can only confirm alive, no server name available
 	try {
 		const controller = new AbortController();
 		const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -66,16 +101,37 @@ async function probeMcpServer(
 			signal: controller.signal,
 		});
 		clearTimeout(timeout);
-		// SSE endpoint returns 200 with text/event-stream
-		if (resp.ok && resp.headers.get("content-type")?.includes("text/event-stream")) {
-			// Don't consume the stream, just verify it's alive
+		if (
+			resp.ok &&
+			resp.headers.get("content-type")?.includes("text/event-stream")
+		) {
 			resp.body?.cancel();
-			return true;
+			return { port, serverName: "", transport: "sse" };
 		}
-		return false;
-	} catch {
-		return false;
+	} catch {}
+
+	return null;
+}
+
+/**
+ * Match an MCP probe result to a product name.
+ * Server names look like "WebStorm MCP Server", "IntelliJ IDEA MCP Server", etc.
+ */
+function matchServerToProduct(
+	serverName: string,
+	productNames: string[],
+): string | null {
+	if (!serverName) return null;
+	const lower = serverName.toLowerCase();
+	for (const name of productNames) {
+		if (lower.includes(name.toLowerCase())) return name;
 	}
+	// IDEA reports as "IntelliJ IDEA MCP Server" but productName from /api/about is "IDEA"
+	if (lower.includes("intellij")) {
+		const idea = productNames.find((n) => n === "IDEA");
+		if (idea) return idea;
+	}
+	return null;
 }
 
 /**
@@ -183,22 +239,48 @@ export async function discoverInstances(
 	ide?: string,
 	timeoutMs = 500,
 ): Promise<IdeInstance[]> {
-	const probes = [];
+	// 1. Scan built-in ports and MCP ports in parallel
+	const builtInProbes = [];
 	for (let port = BUILTIN_PORT_START; port <= BUILTIN_PORT_END; port++) {
-		probes.push(
+		builtInProbes.push(
 			probeBuiltInServer(port, timeoutMs).then((info) =>
 				info ? { ...info, builtInPort: port } : null,
 			),
 		);
 	}
 
-	const results = (await Promise.all(probes)).filter(
+	const mcpProbes = [];
+	for (let port = MCP_PORT_START; port <= MCP_PORT_END; port++) {
+		mcpProbes.push(probeMcpPort(port, timeoutMs));
+	}
+
+	const [builtInResults, mcpResults] = await Promise.all([
+		Promise.all(builtInProbes),
+		Promise.all(mcpProbes),
+	]);
+
+	const ides = builtInResults.filter(
 		(r): r is NonNullable<typeof r> => r !== null,
 	);
+	const mcpPorts = mcpResults.filter(
+		(r): r is McpProbeResult => r !== null,
+	);
 
+	// 2. Build a map: productName → matched MCP probe (only via server name)
+	const productNames = ides.map((i) => i.productName);
+	const mcpByProduct = new Map<string, McpProbeResult>();
+
+	for (const mcp of mcpPorts) {
+		const product = matchServerToProduct(mcp.serverName, productNames);
+		if (product && !mcpByProduct.has(product)) {
+			mcpByProduct.set(product, mcp);
+		}
+	}
+
+	// 3. For IDEs without a server-name match, try xml config port or assign unmatched ports
 	const instances: IdeInstance[] = [];
 
-	for (const r of results) {
+	for (const r of ides) {
 		if (
 			ide &&
 			!r.productName.toLowerCase().includes(ide.toLowerCase()) &&
@@ -212,12 +294,32 @@ export async function discoverInstances(
 			? readMcpServerXml(productDir)
 			: { port: null, enabled: false, braveMode: false };
 
-		const mcpPort = xmlConfig.port ?? r.builtInPort + MCP_PORT_OFFSET;
-		const mcpAlive = await probeMcpServer(mcpPort, timeoutMs);
+		let mcpPort: number;
+		let mcpEnabled: boolean;
+		let mcpTransport: "stream" | "sse";
 
-		// 2026.1+ (baseline >= 261) supports /stream, older only /sse
-		const baseline = parseInt(r.buildNumber.split(".")[0] ?? "0", 10);
-		const mcpPath = baseline >= 261 ? "/stream" : "/sse";
+		const matched = mcpByProduct.get(r.productName);
+
+		if (xmlConfig.port) {
+			// Explicit port in config takes priority
+			mcpPort = xmlConfig.port;
+			const probe = mcpPorts.find((m) => m.port === xmlConfig.port);
+			mcpEnabled = !!probe;
+			mcpTransport = probe?.transport ?? "stream";
+		} else if (matched) {
+			// Matched by server name from initialize handshake
+			mcpPort = matched.port;
+			mcpEnabled = true;
+			mcpTransport = matched.transport;
+		} else {
+			// No MCP port matched — report as inactive
+			const baseline = parseInt(r.buildNumber.split(".")[0] ?? "0", 10);
+			mcpPort = 0;
+			mcpEnabled = false;
+			mcpTransport = baseline >= 261 ? "stream" : "sse";
+		}
+
+		const mcpPath = `/${mcpTransport}`;
 
 		const openedProjects = productDir
 			? readOpenedProjects(productDir)
@@ -229,9 +331,11 @@ export async function discoverInstances(
 			displayName: r.name,
 			builtInPort: r.builtInPort,
 			mcpPort,
-			mcpEnabled: mcpAlive,
+			mcpEnabled,
 			braveMode: xmlConfig.braveMode,
-			endpoint: `http://127.0.0.1:${mcpPort}${mcpPath}`,
+			endpoint: mcpPort
+				? `http://127.0.0.1:${mcpPort}${mcpPath}`
+				: "",
 			openedProjects,
 		});
 	}
