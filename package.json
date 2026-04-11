@@ -5,17 +5,18 @@
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
-    "jbctl": "dist/cli.js"
+    "jbctl": "dist/bin.sh"
   },
   "files": [
-    "dist/cli.js"
+    "dist/cli.js",
+    "dist/bin.sh"
   ],
   "scripts": {
     "start": "bun src/cli.ts",
     "test": "bun test",
     "build": "bun scripts/build.ts",
     "build:all": "bun scripts/build.ts --all",
-    "build:npm": "bun build src/cli.ts --target node --outfile dist/cli.js && sed -i '' '1s|#!/usr/bin/env bun|#!/usr/bin/env node|' dist/cli.js",
+    "build:npm": "bun build src/cli.ts --target node --outfile dist/cli.js && cp scripts/launcher.sh dist/bin.sh && chmod +x dist/bin.sh",
     "prepublishOnly": "bun run build:npm"
   },
   "engines": {

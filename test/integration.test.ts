@@ -12,6 +12,29 @@ const MOCK_ENDPOINT = `http://127.0.0.1:${MOCK_PORT}/stream`;
 const PROJECT_PATH = "/test/project";
 const CLI = ["bun", "src/cli.ts"];
 
+// ─── IDE Detection ─────────────────────────────────────
+
+/** Probe JetBrains built-in ports to detect running IDEs */
+async function detectRunningIdes(): Promise<number> {
+	let count = 0;
+	const probes = [];
+	for (let port = 63342; port <= 63352; port++) {
+		probes.push(
+			fetch(`http://127.0.0.1:${port}/api/about`, {
+				signal: AbortSignal.timeout(500),
+			})
+				.then((r) => r.ok)
+				.catch(() => false),
+		);
+	}
+	for (const alive of await Promise.all(probes)) {
+		if (alive) count++;
+	}
+	return count;
+}
+
+let runningIdeCount: number;
+
 // ─── Mock MCP Server ────────────────────────────────────
 
 let httpServer: HttpServer;
@@ -65,6 +88,8 @@ function setupMcpServer(server: Server) {
 }
 
 beforeAll(async () => {
+	runningIdeCount = await detectRunningIdes();
+
 	// Map of sessionId -> transport, to persist sessions across requests
 	const sessions = new Map<string, StreamableHTTPServerTransport>();
 
@@ -238,11 +263,6 @@ describe("integration: error cases", () => {
 		expect(exitCode).toBe(0);
 	});
 
-	test("missing endpoint triggers auto-discovery (exits 1 when no IDE found)", async () => {
-		const { exitCode } = await run("doctor", "-p", "/tmp");
-		expect(exitCode).toBe(1);
-	});
-
 	test("connection to dead endpoint exits 1", async () => {
 		const { exitCode } = await run(
 			"doctor",
@@ -252,5 +272,100 @@ describe("integration: error cases", () => {
 			"http://127.0.0.1:1/stream",
 		);
 		expect(exitCode).toBe(1);
+	});
+});
+
+describe("integration: auto-discovery", () => {
+	test("missing endpoint triggers auto-discovery", async () => {
+		const { exitCode, stderr } = await run("doctor", "-p", "/tmp");
+		if (runningIdeCount === 0) {
+			// No IDE running — should fail with connection error
+			expect(exitCode).toBe(1);
+			expect(stderr).toContain("CONNECTION_ERROR");
+		} else if (runningIdeCount === 1) {
+			// Single IDE — auto-selects it regardless of project path
+			expect(exitCode).toBe(0);
+			expect(stderr).toContain("Auto-detected:");
+		} else {
+			// Multiple IDEs — /tmp won't match any project, should fail
+			expect(exitCode).toBe(1);
+			expect(stderr).toContain("Multiple MCP-active IDEs");
+		}
+	});
+
+	test("auto-discovery with explicit project path", async () => {
+		// Use cwd as project — more likely to match a running IDE
+		const cwd = process.cwd();
+		const { exitCode, stderr } = await run("doctor", "-p", cwd);
+		if (runningIdeCount === 0) {
+			expect(exitCode).toBe(1);
+		} else {
+			// With cwd as project, at least one IDE should match
+			expect(exitCode).toBe(0);
+			expect(stderr).toContain("Auto-detected:");
+		}
+	});
+});
+
+describe("integration: discover", () => {
+	test("discover returns IDE list or connection error", async () => {
+		const { stdout, stderr, exitCode } = await run("discover");
+		if (runningIdeCount > 0) {
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain("MCP");
+		} else {
+			expect(exitCode).toBe(1);
+			expect(stderr).toContain("CONNECTION_ERROR");
+		}
+	});
+
+	test("discover --json returns valid JSON array", async () => {
+		const { stdout, exitCode } = await run("discover", "--json");
+		if (runningIdeCount > 0) {
+			expect(exitCode).toBe(0);
+			const parsed = JSON.parse(stdout);
+			expect(Array.isArray(parsed)).toBe(true);
+			expect(parsed.length).toBeGreaterThan(0);
+			expect(parsed[0]).toHaveProperty("productName");
+			expect(parsed[0]).toHaveProperty("endpoint");
+			expect(parsed[0]).toHaveProperty("mcpEnabled");
+			expect(parsed[0]).toHaveProperty("builtInPort");
+			expect(parsed[0]).toHaveProperty("braveMode");
+			expect(parsed[0]).toHaveProperty("openedProjects");
+		} else {
+			expect(exitCode).toBe(1);
+		}
+	});
+
+	test("discover --ide filters by product name", async () => {
+		const { stdout, exitCode } = await run(
+			"discover",
+			"--ide",
+			"nonexistent_ide_xyz",
+		);
+		// Even with IDEs running, a nonexistent filter should return nothing
+		expect(exitCode).toBe(1);
+	});
+
+	test("discover --json --ide filters results", async () => {
+		if (runningIdeCount === 0) return; // skip when no IDE available
+		const { stdout, exitCode } = await run("discover", "--json");
+		expect(exitCode).toBe(0);
+		const all = JSON.parse(stdout) as any[];
+		const productName = all[0].productName;
+
+		// Filter by the actual product name — should return at least that one
+		const filtered = await run(
+			"discover",
+			"--json",
+			"--ide",
+			productName,
+		);
+		expect(filtered.exitCode).toBe(0);
+		const filteredParsed = JSON.parse(filtered.stdout) as any[];
+		expect(filteredParsed.length).toBeGreaterThanOrEqual(1);
+		expect(
+			filteredParsed.every((i: any) => i.productName === productName),
+		).toBe(true);
 	});
 });
