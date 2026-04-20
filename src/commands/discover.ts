@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { join, posix, win32 } from "node:path";
 import { CliError } from "../errors.ts";
 
 export interface IdeInstance {
@@ -19,13 +20,76 @@ const BUILTIN_PORT_END = 63352;
 const MCP_PORT_START = 64342;
 const MCP_PORT_END = 64352;
 
-const JETBRAINS_SUPPORT_DIR =
-	process.platform === "darwin"
-		? join(
-				process.env.HOME || "",
-				"Library/Application Support/JetBrains",
-			)
-		: join(process.env.HOME || "", ".local/share/JetBrains");
+function getPathApi(platform: NodeJS.Platform = process.platform) {
+	return platform === "win32" ? win32 : posix;
+}
+
+function getHomeDirectory(env: NodeJS.ProcessEnv = process.env): string {
+	return env.HOME || env.USERPROFILE || homedir();
+}
+
+export function getJetBrainsConfigDir(
+	platform: NodeJS.Platform = process.platform,
+	env: NodeJS.ProcessEnv = process.env,
+): string {
+	if (platform === "darwin") {
+		return join(getHomeDirectory(env), "Library/Application Support/JetBrains");
+	}
+
+	if (platform === "win32") {
+		return win32.join(
+			env.APPDATA || win32.join(getHomeDirectory(env), "AppData", "Roaming"),
+			"JetBrains",
+		);
+	}
+
+	return join(
+		env.XDG_CONFIG_HOME || join(getHomeDirectory(env), ".config"),
+		"JetBrains",
+	);
+}
+
+// Backward-compatible alias for the earlier helper name used in PR #2 tests.
+export const getJetBrainsConfigRoot = getJetBrainsConfigDir;
+
+export function getLoopbackHosts(
+	platform: NodeJS.Platform = process.platform,
+): string[] {
+	return platform === "win32"
+		? ["localhost", "127.0.0.1"]
+		: ["127.0.0.1", "localhost"];
+}
+
+export function normalizeProjectPath(
+	projectPath: string,
+	platform: NodeJS.Platform = process.platform,
+): string {
+	const pathApi = getPathApi(platform);
+	const normalized = pathApi.normalize(projectPath).replace(/[\\/]+$/, "");
+	return platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+export function projectPathMatches(
+	projectPath: string,
+	openedProject: string,
+	platform: NodeJS.Platform = process.platform,
+): boolean {
+	const pathApi = getPathApi(platform);
+	const project = normalizeProjectPath(projectPath, platform);
+	const opened = normalizeProjectPath(openedProject, platform);
+
+	if (!project || !opened) return false;
+	return project === opened || project.startsWith(`${opened}${pathApi.sep}`);
+}
+
+export function getProjectLabel(
+	projectPath: string,
+	platform: NodeJS.Platform = process.platform,
+): string {
+	const pathApi = getPathApi(platform);
+	const normalized = pathApi.normalize(projectPath).replace(/[\\/]+$/, "");
+	return pathApi.basename(normalized) || projectPath;
+}
 
 /** Probe a single port for JetBrains built-in web server */
 async function probeBuiltInServer(
@@ -57,6 +121,7 @@ async function probeBuiltInServer(
 
 interface McpProbeResult {
 	port: number;
+	host: string;
 	serverName: string;
 	transport: "stream" | "sse";
 }
@@ -69,46 +134,49 @@ async function probeMcpPort(
 	port: number,
 	timeoutMs: number,
 ): Promise<McpProbeResult | null> {
-	// Try Streamable HTTP — a single POST gives us the server name
-	try {
-		const resp = await fetch(`http://127.0.0.1:${port}/stream`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json", Accept: "application/json" },
-			body: JSON.stringify({
-				jsonrpc: "2.0",
-				id: 1,
-				method: "initialize",
-				params: {
-					protocolVersion: "2025-03-26",
-					capabilities: {},
-					clientInfo: { name: "jbctl-discover", version: "0.1.0" },
+	for (const host of getLoopbackHosts()) {
+		try {
+			const resp = await fetch(`http://${host}:${port}/stream`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Accept: "application/json",
 				},
-			}),
-			signal: AbortSignal.timeout(timeoutMs),
-		});
-		if (resp.ok) {
-			const data = (await resp.json()) as any;
-			const serverName: string = data?.result?.serverInfo?.name ?? "";
-			return { port, serverName, transport: "stream" };
-		}
-	} catch {}
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id: 1,
+					method: "initialize",
+					params: {
+						protocolVersion: "2025-03-26",
+						capabilities: {},
+						clientInfo: { name: "jbctl-discover", version: "0.1.0" },
+					},
+				}),
+				signal: AbortSignal.timeout(timeoutMs),
+			});
+			if (resp.ok) {
+				const data = (await resp.json()) as Record<string, any>;
+				const serverName: string = data?.result?.serverInfo?.name ?? "";
+				return { port, host, serverName, transport: "stream" };
+			}
+		} catch {}
 
-	// Try SSE — can only confirm alive, no server name available
-	try {
-		const controller = new AbortController();
-		const timeout = setTimeout(() => controller.abort(), timeoutMs);
-		const resp = await fetch(`http://127.0.0.1:${port}/sse`, {
-			signal: controller.signal,
-		});
-		clearTimeout(timeout);
-		if (
-			resp.ok &&
-			resp.headers.get("content-type")?.includes("text/event-stream")
-		) {
-			resp.body?.cancel();
-			return { port, serverName: "", transport: "sse" };
-		}
-	} catch {}
+		try {
+			const controller = new AbortController();
+			const timeout = setTimeout(() => controller.abort(), timeoutMs);
+			const resp = await fetch(`http://${host}:${port}/sse`, {
+				signal: controller.signal,
+			});
+			clearTimeout(timeout);
+			if (
+				resp.ok &&
+				resp.headers.get("content-type")?.includes("text/event-stream")
+			) {
+				resp.body?.cancel();
+				return { port, host, serverName: "", transport: "sse" };
+			}
+		} catch {}
+	}
 
 	return null;
 }
@@ -126,7 +194,6 @@ function matchServerToProduct(
 	for (const name of productNames) {
 		if (lower.includes(name.toLowerCase())) return name;
 	}
-	// IDEA reports as "IntelliJ IDEA MCP Server" but productName from /api/about is "IDEA"
 	if (lower.includes("intellij")) {
 		const idea = productNames.find((n) => n === "IDEA");
 		if (idea) return idea;
@@ -142,7 +209,7 @@ function readMcpServerXml(
 	productDir: string,
 ): { port: number | null; enabled: boolean; braveMode: boolean } {
 	const xmlPath = join(
-		JETBRAINS_SUPPORT_DIR,
+		getJetBrainsConfigDir(),
 		productDir,
 		"options/mcpServer.xml",
 	);
@@ -167,23 +234,21 @@ function readMcpServerXml(
  */
 function readOpenedProjects(productDir: string): string[] {
 	const xmlPath = join(
-		JETBRAINS_SUPPORT_DIR,
+		getJetBrainsConfigDir(),
 		productDir,
 		"options/recentProjects.xml",
 	);
 	try {
 		const xml = readFileSync(xmlPath, "utf-8");
-		const home = process.env.HOME || "";
+		const home = getHomeDirectory();
 		const projects: string[] = [];
 
-		// Match entry keys where the nested RecentProjectMetaInfo has opened="true"
 		const entryRegex =
 			/<entry key="([^"]+)">\s*<value>\s*<RecentProjectMetaInfo[^>]*opened="true"/g;
 		let match: RegExpExecArray | null;
 		while ((match = entryRegex.exec(xml)) !== null) {
 			let path = match[1]!;
 			path = path.replace("$USER_HOME$", home);
-			// Skip non-filesystem paths (e.g. $APPLICATION_CONFIG_DIR$/...)
 			if (path.includes("$")) continue;
 			projects.push(path);
 		}
@@ -216,8 +281,6 @@ function findProductDir(
 	const prefix = PRODUCT_DIR_PREFIX[productName];
 	if (!prefix) return null;
 
-	// buildNumber like "261.22158.274" → baselineVersion "2026.1" (261 → 2026.1)
-	// Or "253.32098.37" → "2025.3"
 	const baseline = parseInt(buildNumber.split(".")[0] ?? "0", 10);
 	const major = 2000 + Math.floor(baseline / 10);
 	const minor = baseline % 10;
@@ -227,7 +290,7 @@ function findProductDir(
 
 	try {
 		const { statSync } = require("node:fs");
-		statSync(join(JETBRAINS_SUPPORT_DIR, dirName));
+		statSync(join(getJetBrainsConfigDir(), dirName));
 		return dirName;
 	} catch {
 		return null;
@@ -239,7 +302,6 @@ export async function discoverInstances(
 	ide?: string,
 	timeoutMs = 500,
 ): Promise<IdeInstance[]> {
-	// 1. Scan built-in ports and MCP ports in parallel
 	const builtInProbes = [];
 	for (let port = BUILTIN_PORT_START; port <= BUILTIN_PORT_END; port++) {
 		builtInProbes.push(
@@ -266,7 +328,6 @@ export async function discoverInstances(
 		(r): r is McpProbeResult => r !== null,
 	);
 
-	// 2. Build a map: productName → matched MCP probe (only via server name)
 	const productNames = ides.map((i) => i.productName);
 	const mcpByProduct = new Map<string, McpProbeResult>();
 
@@ -277,7 +338,6 @@ export async function discoverInstances(
 		}
 	}
 
-	// 3. For IDEs without a server-name match, try xml config port or assign unmatched ports
 	const instances: IdeInstance[] = [];
 
 	for (const r of ides) {
@@ -293,37 +353,36 @@ export async function discoverInstances(
 		const xmlConfig = productDir
 			? readMcpServerXml(productDir)
 			: { port: null, enabled: false, braveMode: false };
+		const baseline = parseInt(r.buildNumber.split(".")[0] ?? "0", 10);
+		const defaultTransport = baseline >= 261 ? "stream" : "sse";
+		const defaultHost = getLoopbackHosts()[0]!;
 
 		let mcpPort: number;
 		let mcpEnabled: boolean;
 		let mcpTransport: "stream" | "sse";
+		let mcpHost = defaultHost;
 
 		const matched = mcpByProduct.get(r.productName);
 
 		if (xmlConfig.port) {
-			// Explicit port in config takes priority
 			mcpPort = xmlConfig.port;
 			const probe = mcpPorts.find((m) => m.port === xmlConfig.port);
 			mcpEnabled = !!probe;
-			mcpTransport = probe?.transport ?? "stream";
+			mcpTransport = probe?.transport ?? defaultTransport;
+			mcpHost = probe?.host ?? defaultHost;
 		} else if (matched) {
-			// Matched by server name from initialize handshake
 			mcpPort = matched.port;
 			mcpEnabled = true;
 			mcpTransport = matched.transport;
+			mcpHost = matched.host;
 		} else {
-			// No MCP port matched — report as inactive
-			const baseline = parseInt(r.buildNumber.split(".")[0] ?? "0", 10);
 			mcpPort = 0;
 			mcpEnabled = false;
-			mcpTransport = baseline >= 261 ? "stream" : "sse";
+			mcpTransport = defaultTransport;
 		}
 
 		const mcpPath = `/${mcpTransport}`;
-
-		const openedProjects = productDir
-			? readOpenedProjects(productDir)
-			: [];
+		const openedProjects = productDir ? readOpenedProjects(productDir) : [];
 
 		instances.push({
 			productName: r.productName,
@@ -333,9 +392,7 @@ export async function discoverInstances(
 			mcpPort,
 			mcpEnabled,
 			braveMode: xmlConfig.braveMode,
-			endpoint: mcpPort
-				? `http://127.0.0.1:${mcpPort}${mcpPath}`
-				: "",
+			endpoint: mcpPort ? `http://${mcpHost}:${mcpPort}${mcpPath}` : "",
 			openedProjects,
 		});
 	}
@@ -373,7 +430,7 @@ export async function runDiscover(
 			];
 			if (i.openedProjects.length > 0) {
 				lines.push(
-					`  Projects: ${i.openedProjects.map((p) => p.split("/").pop()).join(", ")}`,
+					`  Projects: ${i.openedProjects.map((p) => getProjectLabel(p)).join(", ")}`,
 				);
 			}
 			return lines.join("\n");
