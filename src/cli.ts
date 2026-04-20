@@ -3,8 +3,10 @@
 import { ToolAdapter } from "./adapter.ts";
 import { runCall } from "./commands/call.ts";
 import {
+	getProjectLabel,
 	type IdeInstance,
 	discoverInstances,
+	projectPathMatches,
 	runDiscover,
 } from "./commands/discover.ts";
 import { runDoctor } from "./commands/doctor.ts";
@@ -49,7 +51,7 @@ async function resolveByProject(
 ): Promise<IdeInstance | undefined> {
 	// Fast path: match opened projects from config files
 	const matched = instances.filter((i) =>
-		i.openedProjects.some((p) => projectPath.startsWith(p)),
+		i.openedProjects.some((p) => projectPathMatches(projectPath, p)),
 	);
 	if (matched.length === 1) return matched[0];
 
@@ -159,7 +161,13 @@ async function main() {
 			detected = await resolveByProject(active, config.project);
 			if (!detected) {
 				const list = active
-					.map((i) => `  ${i.displayName}  →  ${i.endpoint}`)
+					.map((i) => {
+						const projects =
+							i.openedProjects.length > 0
+								? ` [${i.openedProjects.map((p) => getProjectLabel(p)).join(", ")}]`
+								: "";
+						return `  ${i.displayName}${projects}  →  ${i.endpoint}`;
+					})
 					.join("\n");
 				console.error(
 					`Error [CONNECTION_ERROR]: Multiple MCP-active IDEs found and none matched project "${config.project}". Specify --endpoint:\n${list}`,
