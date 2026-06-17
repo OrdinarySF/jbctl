@@ -11,15 +11,19 @@ import {
 	projectPathMatches,
 } from "../src/commands/discover.ts";
 
-const originalHome = process.env.HOME;
-const originalUserProfile = process.env.USERPROFILE;
-const originalAppData = process.env.APPDATA;
+const originalEnv = {
+	HOME: process.env.HOME,
+	USERPROFILE: process.env.USERPROFILE,
+	APPDATA: process.env.APPDATA,
+	XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+};
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
-	process.env.HOME = originalHome;
-	process.env.USERPROFILE = originalUserProfile;
-	process.env.APPDATA = originalAppData;
+	for (const [key, value] of Object.entries(originalEnv)) {
+		if (value === undefined) delete process.env[key];
+		else process.env[key] = value;
+	}
 	globalThis.fetch = originalFetch;
 	rmSync(join(process.cwd(), ".tmp-discover-test"), {
 		recursive: true,
@@ -81,9 +85,19 @@ describe("discoverInstances", () => {
 			".tmp-discover-test",
 			`${Date.now()}-${Math.random().toString(16).slice(2)}`,
 		);
+
+		process.env.HOME = tempHome;
+		delete process.env.USERPROFILE;
+		delete process.env.APPDATA;
+		delete process.env.XDG_CONFIG_HOME;
+
+		// Resolve the config dir the same way discovery does so the test passes on
+		// every platform (macOS uses Library/Application Support, Linux uses
+		// ~/.config) instead of hard-coding the macOS layout.
 		const productDir = join(
-			tempHome,
-			"Library/Application Support/JetBrains/IntelliJIdea2025.3/options",
+			getJetBrainsConfigDir(),
+			"IntelliJIdea2025.3",
+			"options",
 		);
 		mkdirSync(productDir, { recursive: true });
 		writeFileSync(
@@ -111,9 +125,6 @@ describe("discoverInstances", () => {
 			].join("\n"),
 		);
 
-		process.env.HOME = tempHome;
-		process.env.USERPROFILE = undefined;
-		process.env.APPDATA = undefined;
 		globalThis.fetch = (async (input) => {
 			const url =
 				typeof input === "string"
