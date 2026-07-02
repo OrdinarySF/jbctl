@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createServer, type Server as HttpServer } from "node:http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
 	CallToolRequestSchema,
@@ -9,6 +10,8 @@ import {
 
 const MOCK_PORT = 18931;
 const MOCK_ENDPOINT = `http://127.0.0.1:${MOCK_PORT}/stream`;
+const SSE_ONLY_PORT = 18932;
+const SSE_ONLY_ENDPOINT = `http://127.0.0.1:${SSE_ONLY_PORT}/stream`;
 const PROJECT_PATH = "/test/project";
 const CLI = ["bun", "src/cli.ts"];
 
@@ -38,6 +41,7 @@ let runningIdeCount: number;
 // ─── Mock MCP Server ────────────────────────────────────
 
 let httpServer: HttpServer;
+let sseOnlyServer: HttpServer;
 
 function setupMcpServer(server: Server) {
 	server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -126,10 +130,48 @@ beforeAll(async () => {
 		});
 		httpServer.listen(MOCK_PORT, () => resolve());
 	});
+
+	const sseSessions = new Map<string, SSEServerTransport>();
+	await new Promise<void>((resolve) => {
+		sseOnlyServer = createServer(async (req, res) => {
+			const url = new URL(req.url ?? "/", `http://127.0.0.1:${SSE_ONLY_PORT}`);
+
+			if (req.method === "GET" && url.pathname === "/sse") {
+				const transport = new SSEServerTransport("/messages", res);
+				sseSessions.set(transport.sessionId, transport);
+				transport.onclose = () => {
+					sseSessions.delete(transport.sessionId);
+				};
+
+				const mcpServer = new Server(
+					{ name: "MockSSEIDE", version: "1.0.0" },
+					{ capabilities: { tools: {} } },
+				);
+				setupMcpServer(mcpServer);
+				await mcpServer.connect(transport);
+				return;
+			}
+
+			if (req.method === "POST" && url.pathname === "/messages") {
+				const sessionId = url.searchParams.get("sessionId");
+				const transport = sessionId ? sseSessions.get(sessionId) : undefined;
+				if (!transport) {
+					res.writeHead(404).end("Session not found");
+					return;
+				}
+				await transport.handlePostMessage(req, res);
+				return;
+			}
+
+			res.writeHead(404).end("Not found");
+		});
+		sseOnlyServer.listen(SSE_ONLY_PORT, () => resolve());
+	});
 });
 
 afterAll(async () => {
 	await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+	await new Promise<void>((resolve) => sseOnlyServer.close(() => resolve()));
 });
 
 // ─── Helper ─────────────────────────────────────────────
@@ -175,6 +217,76 @@ describe("integration: doctor", () => {
 		const parsed = JSON.parse(stdout);
 		expect(parsed.server.name).toBe("MockIDE");
 		expect(parsed.status).toBe("connected");
+	});
+
+	test("auto transport falls back from failed SSE to Streamable HTTP", async () => {
+		const { stdout, exitCode } = await run(
+			"doctor",
+			"-p",
+			PROJECT_PATH,
+			"-e",
+			`http://127.0.0.1:${MOCK_PORT}/sse`,
+		);
+		expect(exitCode).toBe(0);
+		expect(stdout).toContain("MockIDE");
+		expect(stdout).toContain("connected");
+	});
+
+	test("auto transport falls back from failed Streamable HTTP to SSE", async () => {
+		const { stdout, exitCode } = await run(
+			"doctor",
+			"-p",
+			PROJECT_PATH,
+			"-e",
+			SSE_ONLY_ENDPOINT,
+		);
+		expect(exitCode).toBe(0);
+		expect(stdout).toContain("MockSSEIDE");
+		expect(stdout).toContain("connected");
+	});
+
+	test("explicit http transport does not fall back to SSE", async () => {
+		const { stderr, exitCode } = await run(
+			"doctor",
+			"-p",
+			PROJECT_PATH,
+			"-e",
+			SSE_ONLY_ENDPOINT,
+			"--transport",
+			"http",
+		);
+		expect(exitCode).toBe(1);
+		expect(stderr).toContain("Failed to connect");
+		expect(stderr).not.toContain("tried 2 transports");
+	});
+
+	test("explicit sse transport does not fall back to Streamable HTTP", async () => {
+		const { stderr, exitCode } = await run(
+			"doctor",
+			"-p",
+			PROJECT_PATH,
+			"-e",
+			`http://127.0.0.1:${MOCK_PORT}/sse`,
+			"--transport",
+			"sse",
+		);
+		expect(exitCode).toBe(1);
+		expect(stderr).toContain("Failed to connect");
+		expect(stderr).not.toContain("tried 2 transports");
+	});
+
+	test("auto transport reports both failed candidates", async () => {
+		const { stderr, exitCode } = await run(
+			"doctor",
+			"-p",
+			PROJECT_PATH,
+			"-e",
+			"http://127.0.0.1:1/stream",
+		);
+		expect(exitCode).toBe(1);
+		expect(stderr).toContain("tried 2 transports");
+		expect(stderr).toContain("1.");
+		expect(stderr).toContain("2.");
 	});
 });
 

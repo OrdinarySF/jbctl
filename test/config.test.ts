@@ -51,6 +51,20 @@ describe("parseCliArgs", () => {
 		expect(config.transport).toBe("sse");
 	});
 
+	test("throws on invalid transport option", () => {
+		expect(() =>
+			parse(
+				"doctor",
+				"-p",
+				"/tmp",
+				"-e",
+				"http://x",
+				"--transport",
+				"stdio",
+			),
+		).toThrow(CliError);
+	});
+
 	test("parses timeout option", () => {
 		const config = parse(
 			"doctor",
@@ -166,5 +180,21 @@ describe("parseCliArgs", () => {
 		expect(() =>
 			parse("doctor", "-p", "/tmp", "--config", "/nonexistent"),
 		).toThrow(CliError);
+	});
+
+	test("throws on unsupported config transport type", () => {
+		const tmpFile = "/tmp/idea-mcp-config-invalid-type-test.json";
+		require("node:fs").writeFileSync(
+			tmpFile,
+			JSON.stringify({
+				type: "stdio",
+				url: "http://127.0.0.1:9999/stream",
+				headers: {},
+			}),
+		);
+
+		expect(() => parse("doctor", "-p", "/tmp", "--config", tmpFile)).toThrow(
+			CliError,
+		);
 	});
 });

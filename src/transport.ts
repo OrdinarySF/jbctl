@@ -4,7 +4,23 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { TransportType } from "./config.ts";
 
 export function parseBaseUrl(endpoint: string): string {
-	return endpoint.replace(/\/(stream|sse)$/, "");
+	try {
+		const url = new URL(endpoint);
+		url.hash = "";
+		url.search = "";
+		url.pathname = url.pathname.replace(/\/+$/, "");
+		url.pathname = url.pathname.replace(/\/(stream|sse)$/, "") || "/";
+		return url.toString().replace(/\/$/, "");
+	} catch {
+		return endpoint
+			.replace(/[?#].*$/, "")
+			.replace(/\/+$/, "")
+			.replace(/\/(stream|sse)$/, "");
+	}
+}
+
+function endpointPrefersSse(endpoint: string): boolean {
+	return endpoint.replace(/[?#].*$/, "").replace(/\/+$/, "").endsWith("/sse");
 }
 
 export function createTransport(
@@ -21,9 +37,15 @@ export function createTransport(
 		return new SSEClientTransport(new URL(`${baseUrl}/sse`));
 	}
 
-	// auto: use the transport matching the URL suffix, fallback to the other
-	if (endpoint.endsWith("/sse")) {
-		return new SSEClientTransport(new URL(`${baseUrl}/sse`));
+	// auto: try the transport matching the URL suffix first, then fall back.
+	if (endpointPrefersSse(endpoint)) {
+		return [
+			new SSEClientTransport(new URL(`${baseUrl}/sse`)),
+			new StreamableHTTPClientTransport(new URL(`${baseUrl}/stream`)),
+		];
 	}
-	return new StreamableHTTPClientTransport(new URL(`${baseUrl}/stream`));
+	return [
+		new StreamableHTTPClientTransport(new URL(`${baseUrl}/stream`)),
+		new SSEClientTransport(new URL(`${baseUrl}/sse`)),
+	];
 }

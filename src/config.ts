@@ -27,6 +27,11 @@ function readConfigFile(path: string): JetBrainsConfig {
 		if (!config.url || !config.type) {
 			throw new Error("Missing required fields: type, url");
 		}
+		if (config.type !== "streamable-http" && config.type !== "sse") {
+			throw new Error(
+				`Invalid config type: ${config.type}. Expected streamable-http or sse`,
+			);
+		}
 		return config as JetBrainsConfig;
 	} catch (e: any) {
 		throw new CliError(
@@ -60,7 +65,17 @@ export function parseCliArgs(argv: string[]): CliConfig {
 
 	// Resolve endpoint from --endpoint, --config, or default
 	let endpoint = values.endpoint as string | undefined;
-	let transport: TransportType = (values.transport as TransportType) || "auto";
+	let transport: TransportType = "auto";
+	if (values.transport) {
+		const rawTransport = values.transport as string;
+		if (!["auto", "http", "sse"].includes(rawTransport)) {
+			throw new CliError(
+				"CONNECTION_ERROR",
+				`Invalid --transport: ${rawTransport}. Expected auto, http, or sse`,
+			);
+		}
+		transport = rawTransport as TransportType;
+	}
 
 	if (!endpoint && values.config) {
 		const cfg = readConfigFile(values.config as string);
